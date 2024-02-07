@@ -1,7 +1,7 @@
 # CVAT Annotation Plugin
 
 A plugin that contains utilities for integrating FiftyOne with the CVAT annotation integration backend
-[described here](https://docs.voxel51.com/integrations/CVAT.html).
+[described here](https://docs.voxel51.com/integrations/cvat.html).
 
 ## Installation
 
