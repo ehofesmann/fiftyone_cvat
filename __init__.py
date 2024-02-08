@@ -105,7 +105,7 @@ def request_annotations(ctx, inputs, required_inputs=True):
 
     fo.annotation_config.backends["custom_cvat"].update({
         "config_cls": "custom_cvat.CVATBackendConfig",
-        "url": "https://cvat.com"
+        "url": "https://app.cvat.ai"
     })
     backend = CVATBackend("custom_cvat")
 

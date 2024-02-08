@@ -16,7 +16,7 @@ Refer to the [main README](https://github.com/voxel51/fiftyone-plugins) for
 more information about managing downloaded plugins and developing plugins
 locally.
 
-Set the `FIFTYONE_CVAT_USERNAME=XXXXX` and `FIFTYONE_CVAT_PASSWORD=XXXXX` environment variables following [these instructions](https://docs.voxel51.com/integrations/cvat.html#authentication).
+Set the `FIFTYONE_CVAT_USERNAME=XXXXX`, `FIFTYONE_CVAT_PASSWORD=XXXXX`, and optionally `FIFTYONE_CVAT_URL=https://my.cvat.ai` environment variables following [these instructions](https://docs.voxel51.com/integrations/cvat.html#authentication).
 
 ### Install in FiftyOne Teams environment:
 
@@ -28,7 +28,7 @@ Set the `FIFTYONE_CVAT_USERNAME=XXXXX` and `FIFTYONE_CVAT_PASSWORD=XXXXX` enviro
 
     (Alternative): Upload it through the [FiftyOne Teams management SDK.](https://docs.voxel51.com/teams/management_sdk.html#fiftyone.management.plugin.upload_plugin)
 
-3) Add the `FIFTYONE_CVAT_USERNAME` and `FIFTYONE_CVAT_PASSWORD` [secrets in your FiftyOne Teams App.](https://docs.voxel51.com/teams/secrets.html)
+3) Add the `FIFTYONE_CVAT_USERNAME`, `FIFTYONE_CVAT_PASSWORD`, and optionally `FIFTYONE_CVAT_URL` [secrets in your FiftyOne Teams App.](https://docs.voxel51.com/teams/secrets.html)
 
 ## Usage
 
