@@ -103,6 +103,9 @@ class RequestAnnotations(foo.Operator):
 def request_annotations(ctx, inputs, required_inputs=True):
     target_view = get_target_view(ctx, inputs)
 
+    if "custom_cvat" not in fo.annotation_config.backends:
+        fo.annotation_config.backends["custom_cvat"] = {}
+
     fo.annotation_config.backends["custom_cvat"].update({
         "config_cls": "custom_cvat.CVATBackendConfig",
         "url": "https://app.cvat.ai"
@@ -536,7 +539,7 @@ class AnnotationBackend(object):
 
 
 class CVATBackend(AnnotationBackend):
-    def get_parameters(self, ctx, inputs):
+    def get_parameters(self, ctx, inputs, required_inputs=True):
         #inputs.str(
         #    "cvat_header",
         #    view=types.Header(
