@@ -1,6 +1,6 @@
 name: "@ehofesmann/cvat"
 description: Utilities for integrating FiftyOne with CVAT
-version: 1.0.0
+version: 1.1.0
 fiftyone:
   version: ">=0.23"
 operators:
