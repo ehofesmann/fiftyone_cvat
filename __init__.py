@@ -736,12 +736,13 @@ class LoadAnnotations(foo.Operator):
             dynamic=True,
         )
 
-    def __call__(self, sample_collection, anno_key, unexpected="prompt", cleanup=False, delegate=False):
+    def __call__(self, sample_collection, anno_key, unexpected="prompt", cleanup=False, dest_field=None, delegate=False):
         ctx = dict(dataset=sample_collection._dataset)
         params = dict(
             anno_key=anno_key,
             unexpected=unexpected,
             cleanup=cleanup,
+            dest_field=dest_field,
             delegate=delegate,
         )
         foo.execute_operator(self.uri, ctx, params=params)
@@ -765,11 +766,12 @@ class LoadAnnotations(foo.Operator):
         anno_key = ctx.params["anno_key"]
         unexpected = ctx.params["unexpected"]
         cleanup = ctx.params["cleanup"]
+        dest_field = ctx.params["dest_field"]
 
         _inject_annotation_secrets(ctx)
 
         ctx.dataset.load_annotations(
-            anno_key, unexpected=unexpected, cleanup=cleanup
+            anno_key, unexpected=unexpected, cleanup=cleanup, dest_field=dest_field,
         )
         ctx.trigger("reload_dataset")
 
@@ -840,6 +842,17 @@ def load_annotations(ctx, inputs):
         description=(
             "Whether to delete any informtation regarding this run from "
             "the annotation backend after loading the annotations"
+        ),
+    )
+
+    inputs.str(
+        "dest_field",
+        required=False,
+        default=None,
+        label="Destination Field",
+        description=(
+            "An optional name of a new destination field into which to load "
+            "the annotations"
         ),
     )
 
