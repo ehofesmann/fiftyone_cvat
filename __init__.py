@@ -775,6 +775,14 @@ class LoadAnnotations(foo.Operator):
 
 
 def load_annotations(ctx, inputs):
+    if "custom_cvat" not in fo.annotation_config.backends:
+        fo.annotation_config.backends["custom_cvat"] = {}
+
+        fo.annotation_config.backends["custom_cvat"].update({
+            "config_cls": "custom_cvat.CVATBackendConfig",
+            "url": "https://app.cvat.ai"
+        })
+
     anno_keys = ctx.dataset.list_annotation_runs()
 
     if not anno_keys:
