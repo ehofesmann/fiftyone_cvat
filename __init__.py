@@ -1130,9 +1130,7 @@ class ImportAnnotations(foo.Operator):
         return foo.OperatorConfig(
             name="import_annotations",
             label="Import annotations",
-            light_icon="/assets/icon-light.svg",
-            dark_icon="/assets/icon-dark.svg",
-            dynamic=True,
+            unlisted=True,
         )
 
     def __call__(
@@ -1166,6 +1164,9 @@ class ImportAnnotations(foo.Operator):
             group_id_attr=group_id_attr,
             **kwargs,
         )
+
+    def execute(self, ctx):
+        pass
 
 
 def register(p):
