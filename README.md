@@ -100,7 +100,7 @@ You can use this operator to load annotations for existing runs back onto your
 dataset.
 
 This operator is essentially a wrapper around the
-[import_annotations method](https://docs.voxel51.com/user_guide/annotation.html#importing-existing-tasks):
+[import_annotations method](https://docs.voxel51.com/integrations/cvat.html#importing-existing-tasks):
 
 ```py
 import fiftyone.operators as foo
