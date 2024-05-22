@@ -93,3 +93,21 @@ delete_annotation_run = foo.get_operator("@ehofesmann/cvat/delete_annotation_run
 
 delete_annotation_run(dataset, anno_key, cleanup=True)
 ```
+
+#### import_annotations
+
+You can use this operator to load annotations for existing runs back onto your
+dataset.
+
+This operator is essentially a wrapper around the
+[import_annotations method](https://docs.voxel51.com/integrations/cvat.html#importing-existing-tasks):
+
+```py
+import fiftyone.operators as foo
+import_annotations = foo.get_operator("@ehofesmann/cvat/import_annotations")
+
+import_annotations(dataset, project_name="foo", data_path=data_map, ...)
+```
+
+**Note**: This operator is currently only supported for programatic exeuction.
+The operator UI for App usage is not yet implemented.

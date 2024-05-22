@@ -1124,6 +1124,51 @@ def _execution_mode(ctx, inputs):
         )
 
 
+class ImportAnnotations(foo.Operator):
+    @property
+    def config(self):
+        return foo.OperatorConfig(
+            name="import_annotations",
+            label="Import annotations",
+            unlisted=True,
+        )
+
+    def __call__(
+            self,
+            sample_collection,
+            project_name=None,
+            project_id=None,
+            task_ids=None,
+            data_path=None,
+            label_types=None,
+            insert_new=True,
+            download_media=False,
+            num_workers=None,
+            occluded_attr=None,
+            group_id_attr=None,
+            **kwargs,
+        ):
+        with fou.add_sys_path(os.path.dirname(os.path.abspath(__file__))):
+            importlib.reload(custom_cvat)
+        custom_cvat.import_annotations(
+            sample_collection,
+            project_name=project_name,
+            project_id=project_id,
+            task_ids=task_ids,
+            data_path=data_path,
+            label_types=label_types,
+            insert_new=insert_new,
+            download_media=download_media,
+            num_workers=num_workers,
+            occluded_attr=occluded_attr,
+            group_id_attr=group_id_attr,
+            **kwargs,
+        )
+
+    def execute(self, ctx):
+        pass
+
+
 def register(p):
     p.register(RequestAnnotations)
     p.register(LoadAnnotations)
@@ -1131,3 +1176,5 @@ def register(p):
     p.register(LoadAnnotationView)
     p.register(RenameAnnotationRun)
     p.register(DeleteAnnotationRun)
+    p.register(ImportAnnotations)
+
