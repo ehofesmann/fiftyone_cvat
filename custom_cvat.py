@@ -2,7 +2,7 @@
 Utilities for working with datasets in
 `CVAT format <https://github.com/opencv/cvat>`_.
 
-| Copyright 2017-2023, Voxel51, Inc.
+| Copyright 2017-2024, Voxel51, Inc.
 | `voxel51.com <https://voxel51.com/>`_
 |
 """
@@ -382,7 +382,7 @@ def _do_download_media(task):
                         task_id, chunk_id, data_type="chunk"
                     )
                 )
-                chunk_path = fos.join(tmp_dir, "%d.%s" % (chunk_id, ext))
+                chunk_path = fos.join(tmp_dir, "%d%s" % (chunk_id, ext))
                 fos.write_file(resp._content, chunk_path)
                 chunk_paths.append(chunk_path)
 
@@ -3084,8 +3084,8 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
             task. Videos are always uploaded one per task
         segment_size (None): maximum number of images per job. Not applicable
             to videos
-        image_quality (75): an int in ``[0, 100]`` determining the image quality
-            to upload to CVAT
+        image_quality (75): an int in ``[0, 100]`` determining the image
+            quality to upload to CVAT
         use_cache (True): whether to use a cache when uploading data. Using a
             cache reduces task creation time as data will be processed
             on-the-fly and stored in the cache when requested
@@ -3106,7 +3106,8 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
             default, no project is used
         project_id (None): an optional ID of an existing CVAT project to which
             to upload the annotation tasks. By default, no project is used
-        task_name (None): an optional task name to use for the created CVAT task
+        task_name (None): an optional task name to use for the created CVAT
+            task
         occluded_attr (None): an optional attribute name containing existing
             occluded values and/or in which to store downloaded occluded values
             for all objects in the annotation run
@@ -3291,6 +3292,10 @@ class CVATBackend(foua.AnnotationBackend):
             "occluded",
             "group_id",
         ]
+
+    @property
+    def supports_clips_views(self):
+        return True
 
     @property
     def supports_keyframes(self):
@@ -4416,7 +4421,8 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                 if not self._supports_content_v2:
                     # IMPORTANT: older versions of CVAT organizes media within
                     # a task alphabetically by filename, so we must give CVAT
-                    # filenames whose alphabetical order matches the order of `paths`
+                    # filenames whose alphabetical order matches the order of
+                    # `paths`
                     filename = "%06d_%s" % (idx, os.path.basename(path))
 
                 if self._server_version >= Version("2.3"):
@@ -4535,6 +4541,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         batch_size = self._get_batch_size(samples, task_size)
         num_batches = math.ceil(num_samples / batch_size)
         is_video = samples.media_type == fom.VIDEO
+        is_clips = samples._is_clips
 
         label_fields = samples._get_media_fields(whitelist=label_schema)
         label_fields = list(label_fields.keys())
@@ -4722,6 +4729,15 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             backend=backend,
         )
 
+        if is_clips:
+            # We must store clip start frame numbers because this information
+            # is required when downloading annotations to map the CVAT frame
+            # IDs back to the correct frame numbers
+            frame_starts = [s[0] for s in samples.values("support")]
+            results.id_map["_clips_frame_start"] = dict(
+                zip(task_ids, frame_starts)
+            )
+
         if save_config:
             results.save_config()
 
@@ -4745,6 +4761,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         task_ids = results.task_ids
         frame_id_map = results.frame_id_map
         labels_task_map = results.labels_task_map
+        is_clips = results._is_clips
 
         _, project_id = self._parse_project_details(
             results.config.project_name, results.config.project_id
@@ -4795,6 +4812,11 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                 frame_stop = data_resp["stop_frame"]
                 frame_step = _parse_frame_step(data_resp)
 
+                if is_clips:
+                    offset = results.id_map["_clips_frame_start"][task_id]
+                    frame_start -= offset
+                    frame_stop -= offset
+
                 # Download task data
                 attr_id_map, _class_map_rev = self._get_attr_class_maps(
                     task_id
@@ -4807,8 +4829,8 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                     all_tags = job_resp["tags"]
                     all_tracks = job_resp["tracks"]
 
-                    # For videos that were subsampled, remap the frame numbers to
-                    # those on the original video
+                    # For videos that were subsampled, remap the frame numbers
+                    # to those on the original video
                     all_shapes = _remap_annotation_frames(
                         all_shapes, frame_start, frame_stop, frame_step
                     )
@@ -4836,8 +4858,9 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
 
                         label_field_results = {}
 
-                        # Dict mapping class labels to the classes used in CVAT.
-                        # These are equal unless a class appears in multiple fields
+                        # Dict mapping class labels to the classes used in
+                        # CVAT. These are equal unless a class appears in
+                        # multiple fields
                         _classes = label_field_classes[label_field]
 
                         # Maps CVAT IDs to FiftyOne labels
@@ -4948,8 +4971,8 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
 
                             frames_metadata[sample_id] = frame_metadata
 
-                        # Polyline(s) corresponding to instance/semantic masks need to
-                        # be converted to their final format
+                        # Polyline(s) corresponding to instance/semantic masks
+                        # need to be converted to their final format
                         self._convert_polylines_to_masks(
                             label_field_results, label_info, frames_metadata
                         )
@@ -5505,6 +5528,20 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         _issue_tracker = issue_tracker
 
         is_video = samples_batch.media_type == fom.VIDEO
+        is_clips = samples_batch._is_clips
+
+        if is_clips:
+            _frame_start, _frame_stop = samples_batch.values("support")[0]
+
+            if frame_start is not None:
+                frame_start = _frame_start + frame_start
+            else:
+                frame_start = _frame_start
+
+            if frame_stop is not None:
+                frame_stop = min(_frame_start + frame_stop, _frame_stop)
+            else:
+                frame_stop = _frame_stop
 
         if is_video:
             # Videos are uploaded in multiple tasks with 1 job per task
@@ -6516,14 +6553,12 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                 xbr = float(round((x + w) * width))
                 ybr = float(round((y + h) * height))
                 bbox = [xtl, ytl, xbr, ybr]
-                rotation = det["rotation"] if "rotation" in det else 0.0 or 0.0
 
                 curr_shapes.append(
                     {
                         "type": "rectangle",
                         "occluded": is_occluded,
                         "points": bbox,
-                        "rotation": rotation,
                         "label_id": class_name,
                         "group": group_id,
                         "frame": frame_id,
