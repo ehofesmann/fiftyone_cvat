@@ -43,6 +43,7 @@ class RequestAnnotations(foo.Operator):
             **kwargs,
         )
         foo.execute_operator(self.uri, ctx, params=params)
+        sample_collection.reload()
         return sample_collection.load_annotation_results(anno_key)
 
     def resolve_input(self, ctx):
