@@ -210,7 +210,7 @@ def get_label_schema(ctx, inputs, backend, view, required_inputs=True):
     schema_choices = types.TabsView()
     schema_choices.add_choice("BUILD", label="Build")
     schema_choices.add_choice("JSON", label="JSON")
-    if backend.name == "cvat":
+    if backend.name in ["cvat", "custom_cvat"]:
         schema_choices.add_choice("PROJECT", label="Existing project")
 
     inputs.enum(
@@ -237,7 +237,16 @@ def get_label_schema(ctx, inputs, backend, view, required_inputs=True):
 
         project_name = ctx.params.get("project_name", None)
 
+        inputs.list(
+            "label_schema_fields",
+            build_label_field_name_and_type(ctx, backend, view),
+            required=False,
+            label="Label fields",
+            description="Configure the field(s) in your label schema",
+        )
+
         return project_name
+
     elif schema_type == "JSON":
         # @todo switch to editable JSON viewer
         prop = inputs.str(
@@ -281,8 +290,9 @@ def get_label_schema(ctx, inputs, backend, view, required_inputs=True):
         return label_schema_fields
 
 
-def build_label_schema_field(ctx, backend, view):
-    field_schema = types.Object()
+def build_label_field_name_and_type(ctx, backend, view, field_schema=None):
+    if not field_schema:
+        field_schema = types.Object()
 
     scalar_types, label_types = backend.get_supported_types()
 
@@ -320,6 +330,13 @@ def build_label_schema_field(ctx, backend, view):
         description="The type of the field",
         view=field_type_choices,
     )
+
+    return field_schema
+
+def build_label_schema_field(ctx, backend, view):
+    field_schema = types.Object()
+
+    field_schema = build_label_field_name_and_type(ctx, backend, view, field_schema=field_schema)
 
     # @todo support per-class attributes
     field_schema.list(
