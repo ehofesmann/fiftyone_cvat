@@ -4546,6 +4546,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         group_id_attr = config.group_id_attr
         task_size = config.task_size
         cloud_manifest = config.cloud_manifest
+        cloud_storage_id = config.cloud_storage_id
         config.job_reviewers = self._parse_reviewers(config.job_reviewers)
 
         project_name, project_id = self._parse_project_details(
@@ -4627,7 +4628,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             for idx, offset in enumerate(range(0, num_samples, batch_size)):
                 samples_batch = samples[offset : (offset + batch_size)]
 
-                if cloud_manifest:
+                if cloud_manifest or cloud_storage_id:
                     # IMPORTANT: CVAT organizes media within a task alphabetically
                     # by filename, so we must sort the samples by filename to
                     # ensure annotations are uploaded properly
@@ -5552,7 +5553,8 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                     "task, but this requires loading all images "
                     "simultaneously into RAM, which will take at least %s. "
                     "Consider specifying a `task_size` to break the data into "
-                    "smaller chunks, or use the `cloud_manifest=True` option",
+                    "smaller chunks, or use the `cloud_manifest` or "
+                    "`cloud_storage_id` options",
                     etau.to_human_bytes_str(required_bytes),
                 )
 
