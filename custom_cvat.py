@@ -2,7 +2,7 @@
 Utilities for working with datasets in
 `CVAT format <https://github.com/opencv/cvat>`_.
 
-| Copyright 2017-2024, Voxel51, Inc.
+| Copyright 2017-2025, Voxel51, Inc.
 | `voxel51.com <https://voxel51.com/>`_
 |
 """
@@ -1619,6 +1619,31 @@ class CVATImage(object):
         )
 
 
+class HasCVATBinaryMask(object):
+    """Mixin for CVAT annotations that store RLE format instance masks."""
+
+    @staticmethod
+    def _rle_to_binary_image_mask(rle, mask_width, mask_height):
+        mask = np.zeros(mask_width * mask_height, dtype=np.uint8)
+        counter = 0
+        for i, val in enumerate(rle):
+            if i % 2 == 1:
+                mask[counter : counter + val] = 1
+            counter += val
+        return mask.reshape(mask_height, mask_width)
+
+    @staticmethod
+    def _mask_to_cvat_rle(binary_mask):
+        counts = []
+        for i, (value, elements) in enumerate(
+            itertools.groupby(binary_mask.ravel(order="C"))
+        ):
+            if i == 0 and value == 1:
+                counts.append(0)
+            counts.append(len(list(elements)))
+        return counts
+
+
 class HasCVATPoints(object):
     """Mixin for CVAT annotations that store a list of ``(x, y)`` pixel
     coordinates.
@@ -3077,6 +3102,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
             media files on disk to upload
         url (None): the url of the CVAT server
         username (None): the CVAT username
+        email (None): the CVAT email
         password (None): the CVAT password
         headers (None): an optional dict of headers to add to all CVAT API
             requests
@@ -3154,6 +3180,11 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
             upload to it the CVAT server (False). This option also accepts the
             path to a manifest file in the bucket
             (ex: ``s3://bucket-name/manifest-name.jsonl``)
+        cloud_storage_id (None): integer for the id of the cloud storage to use
+            to load cloud media. If ``cloud_manifest`` is provided, then this
+            argument is ignored. If ``cloud_manifest`` is ``False`` and
+            ``cloud_storage_id`` is None, then cloud media is downloaded
+            locally and uploaded to the CVAT server
     """
 
     def __init__(
@@ -3163,6 +3194,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         media_field="filepath",
         url=None,
         username=None,
+        email=None,
         password=None,
         headers=None,
         task_size=None,
@@ -3185,6 +3217,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         frame_stop=None,
         frame_step=None,
         cloud_manifest=False,
+        cloud_storage_id=None,
         **kwargs,
     ):
         super().__init__(name, label_schema, media_field=media_field, **kwargs)
@@ -3209,9 +3242,11 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         self.frame_stop = _validate_frame_arg(frame_stop, "frame_stop")
         self.frame_step = _validate_frame_arg(frame_step, "frame_step")
         self.cloud_manifest = cloud_manifest
+        self.cloud_storage_id = cloud_storage_id
 
         # store privately so these aren't serialized
         self._username = username
+        self._email = email
         self._password = password
         self._headers = headers
 
@@ -3222,6 +3257,14 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
     @username.setter
     def username(self, value):
         self._username = value
+
+    @property
+    def email(self):
+        return self._email
+
+    @email.setter
+    def email(self, value):
+        self._email = value
 
     @property
     def password(self):
@@ -3240,10 +3283,14 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         self._headers = value
 
     def load_credentials(
-        self, url=None, username=None, password=None, headers=None
+        self, url=None, username=None, password=None, email=None, headers=None
     ):
         self._load_parameters(
-            url=url, username=username, password=password, headers=headers
+            url=url,
+            username=username,
+            password=password,
+            email=email,
+            headers=headers,
         )
 
 
@@ -3343,6 +3390,7 @@ class CVATBackend(foua.AnnotationBackend):
             self.config.name,
             self.config.url,
             username=self.config.username,
+            email=self.config.email,
             password=self.config.password,
             headers=self.config.headers,
             organization=self.config.organization,
@@ -3590,6 +3638,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         name: the name of the backend
         url: url of the CVAT server
         username (None): the CVAT username
+        email (None): the CVAT email
         password (None): the CVAT password
         headers (None): an optional dict of headers to add to all requests
         organization (None): the name of the organization to use when sending
@@ -3601,6 +3650,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         name,
         url,
         username=None,
+        email=None,
         password=None,
         headers=None,
         organization=None,
@@ -3608,6 +3658,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         self._name = name
         self._url = url.rstrip("/")
         self._username = username
+        self._email = email
         self._password = password
         self._headers = headers
         self._organization = organization
@@ -3807,6 +3858,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
 
         username = self._username
         password = self._password
+        email = self._email
 
         if username is None or password is None:
             username, password = self._prompt_username_password(
@@ -3824,13 +3876,13 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         self._server_version = Version("2")
 
         try:
-            self._login(username, password)
+            self._login(username, password, email=email)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code != 404:
                 raise e
 
             self._server_version = Version("1")
-            self._login(username, password)
+            self._login(username, password, email=email)
 
         self._add_referer()
         self._add_organization()
@@ -3867,12 +3919,19 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
     def close(self):
         self._session.close()
 
-    def _login(self, username, password):
+    def _login(self, username, password, email=None):
+        payload = {
+            "username": username,
+            "password": password,
+        }
+        if email is not None:
+            payload["email"] = email
+
         response = self._make_request(
             self._session.post,
             self.login_url,
             print_error_info=False,
-            json={"username": username, "password": password},
+            json=payload,
         )
 
         if "csrftoken" in response.cookies:
@@ -4297,6 +4356,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         frame_stop=None,
         frame_step=None,
         cloud_manifest=False,
+        cloud_storage_id=None,
     ):
         """Uploads a list of media to the task with the given ID.
 
@@ -4325,6 +4385,11 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                 and upload to it the CVAT server (False). This option also
                 accepts the path to a manifest file in the bucket
                 (ex: ``s3://bucket-name/manifest-name.jsonl``)
+            cloud_storage_id (None): integer for the id of the cloud storage to
+                use to load cloud media. If ``cloud_manifest`` is provided, then
+                this argument is ignored. If ``cloud_manifest`` is ``False`` and
+                ``cloud_storage_id`` is None, then cloud media is downloaded
+                locally and uploaded to the CVAT server
 
         Returns:
             a list of the job IDs created for the task
@@ -4351,8 +4416,14 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             data["sorting_method"] = "predefined"
 
         json = {}
-        if cloud_manifest:
-            self._parse_cloud_files(paths, data, cloud_manifest)
+        if cloud_manifest or cloud_storage_id is not None:
+            if cloud_manifest:
+                self._parse_cloud_manifest_files(paths, data, cloud_manifest)
+            else:
+                self._parse_cloud_storage_id_files(
+                    paths, data, cloud_storage_id
+                )
+
             files = {}
             open_files = []
             if self._supports_content_v2:
@@ -4435,25 +4506,72 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
 
         return files, open_files
 
-    def _parse_cloud_files(self, paths, data, cloud_manifest):
+    def _parse_cloud_manifest_files(self, paths, data, cloud_manifest):
         if not etau.is_str(cloud_manifest):
             # Use default manifest name and location at root of bucket
             cloud_manifest = self._get_default_manifest_from_path(paths[0])
 
-        data["storage"] = "cloud_storage"
         (
             root_dir,
             manifest_filename,
             cloud_storage_id,
         ) = self._parse_cloud_manifest(cloud_manifest)
         self._verify_cloud_files(
-            root_dir, cloud_storage_id, manifest_filename, paths
+            root_dir,
+            cloud_storage_id,
+            paths,
+            manifest_filename=manifest_filename,
         )
-        data["cloud_storage_id"] = cloud_storage_id
 
         # Samples are pre-sorted if using to cloud storage
         server_files = [_to_rel_url(path, root_dir) for path in paths]
         server_files.append(manifest_filename)
+        self._parse_cloud_files(data, cloud_storage_id, server_files)
+
+    def _parse_cloud_storage_id(self, cloud_storage_id):
+
+        storage_url = self.cloud_storage_url(cloud_storage_id)
+        response = self.get(storage_url).json()
+        provider_type = response.get("provider_type", None)
+        endpoint = self._parse_cloud_storage_endpoint_url(response)
+        prefix = self._get_cloud_storage_prefix(
+            provider_type, endpoint=endpoint
+        )
+        if not prefix:
+            raise ValueError(
+                "%s from CVAT cloud storage id (%d) is not a CVAT cloud "
+                "storage provider supported by this integration."
+                % (str(provider_type), int(cloud_storage_id))
+            )
+        bucket = response["resource"]
+        root_dir = prefix + bucket
+
+        return root_dir
+
+    def _get_cloud_storage_prefix(self, provider_type, endpoint=None):
+        if provider_type == CVATCloudProviders.GCS:
+            return fos.GCS_PREFIX
+        elif provider_type == CVATCloudProviders.S3:
+            if endpoint:
+                for _, minio_endpoint in fos.minio_prefixes:
+                    if minio_endpoint == endpoint:
+                        return minio_endpoint
+            else:
+                return fos.S3_PREFIX
+
+        return None
+
+    def _parse_cloud_storage_id_files(self, paths, data, cloud_storage_id):
+        root_dir = self._parse_cloud_storage_id(cloud_storage_id)
+        self._verify_cloud_files(root_dir, cloud_storage_id, paths)
+
+        server_files = [_to_rel_url(path, root_dir) for path in paths]
+
+        self._parse_cloud_files(data, cloud_storage_id, server_files)
+
+    def _parse_cloud_files(self, data, cloud_storage_id, server_files):
+        data["storage"] = "cloud_storage"
+        data["cloud_storage_id"] = cloud_storage_id
 
         if self._supports_content_v2:
             data["server_files"] = server_files
@@ -5521,6 +5639,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         job_reviewers = config.job_reviewers
         issue_tracker = config.issue_tracker
         cloud_manifest = config.cloud_manifest
+        cloud_storage_id = config.cloud_storage_id
 
         _task_assignee = task_assignee
         _job_assignees = job_assignees
@@ -5592,6 +5711,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             frame_stop=frame_stop,
             frame_step=frame_step,
             cloud_manifest=cloud_manifest,
+            cloud_storage_id=cloud_storage_id,
         )
 
         self._verify_uploaded_frames(
@@ -6059,6 +6179,9 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             if shape_type == "rectangle":
                 label_type = "detections"
                 label = cvat_shape.to_detection()
+            elif shape_type == "mask":
+                label_type = "detections"
+                label = cvat_shape.to_instance()
             elif shape_type == "polygon":
                 if expected_label_type == "segmentation":
                     # A piece of a segmentation mask
@@ -6569,27 +6692,26 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                     }
                 )
             elif label_type in ("instance", "instances"):
-                if det.mask is None:
+                if det.has_mask is None:
                     continue
 
-                polygon = det.to_polyline()
-                for points in polygon.points:
-                    if len(points) < 3:
-                        continue  # CVAT polygons must contain >= 3 points
+                if self._server_version >= Version("2.3"):
+                    x, y, _, _ = det.bounding_box
+                    frame_width, frame_height = frame_size
+                    mask_height, mask_width = det.mask.shape
+                    xtl, ytl = round(x * frame_width), round(y * frame_height)
+                    xbr, ybr = xtl + mask_width, ytl + mask_height
 
-                    abs_points = HasCVATPoints._to_abs_points(
-                        points, frame_size
-                    )
-                    flattened_points = list(
-                        itertools.chain.from_iterable(abs_points)
-                    )
+                    # -1 to convert from CVAT indexing
+                    rle = HasCVATBinaryMask._mask_to_cvat_rle(det.mask)
+                    rle.extend([xtl, ytl, xbr - 1, ybr - 1])
 
                     curr_shapes.append(
                         {
-                            "type": "polygon",
+                            "type": "mask",
                             "occluded": is_occluded,
                             "z_order": 0,
-                            "points": flattened_points,
+                            "points": rle,
                             "label_id": class_name,
                             "group": group_id,
                             "frame": frame_id,
@@ -6597,6 +6719,32 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                             "attributes": deepcopy(attributes),
                         }
                     )
+                else:
+                    polygon = det.to_polyline()
+                    for points in polygon.points:
+                        if len(points) < 3:
+                            continue  # CVAT polygons must contain >= 3 points
+
+                        abs_points = HasCVATPoints._to_abs_points(
+                            points, frame_size
+                        )
+                        flattened_points = list(
+                            itertools.chain.from_iterable(abs_points)
+                        )
+
+                        curr_shapes.append(
+                            {
+                                "type": "polygon",
+                                "occluded": is_occluded,
+                                "z_order": 0,
+                                "points": flattened_points,
+                                "label_id": class_name,
+                                "group": group_id,
+                                "frame": frame_id,
+                                "source": "manual",
+                                "attributes": deepcopy(attributes),
+                            }
+                        )
 
             if not curr_shapes:
                 continue
@@ -7095,6 +7243,15 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         )
         return root_dir, manifest_filename, cloud_storage_id
 
+    def _parse_cloud_storage_endpoint_url(self, result):
+        specific_attrs = self._parse_specific_attributes(
+            result["specific_attributes"]
+        )
+        result_endpoint = specific_attrs.get("endpoint_url", None)
+        if etau.is_str(result_endpoint):
+            result_endpoint = result_endpoint.rstrip("/") + "/"
+        return result_endpoint
+
     def _get_cloud_storage_id(
         self, provider_type, resource, manifest_filename, endpoints=None
     ):
@@ -7106,12 +7263,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         cloud_storage_id = None
 
         for result in results:
-            specific_attrs = self._parse_specific_attributes(
-                result["specific_attributes"]
-            )
-            result_endpoint = specific_attrs.get("endpoint_url", None)
-            if etau.is_str(result_endpoint):
-                result_endpoint = result_endpoint.rstrip("/") + "/"
+            result_endpoint = self._parse_cloud_storage_endpoint_url(result)
 
             valid_endpoint = endpoints is None or result_endpoint in endpoints
 
@@ -7128,42 +7280,66 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         return cloud_storage_id
 
     def _verify_cloud_files(
-        self, root_dir, cloud_storage_id, manifest_filename, paths
+        self, root_dir, cloud_storage_id, paths, manifest_filename=None
     ):
+        # Ensure all media paths point to the given cloud storage bucket
         file_systems = {fos.get_file_system(p) for p in paths}
         root_fs = fos.get_file_system(root_dir)
         if len(file_systems) > 1:
             raise ValueError(
-                "Attempting to use manifest from file system '%s' but found "
-                "samples from multiple file systems: %s"
+                "Attempting to load media from CVAT cloud storage '%s', but "
+                "found samples from multiple file systems: %s"
                 % (root_fs, file_systems)
             )
 
         paths_fs = list(file_systems)[0]
         if root_fs != paths_fs:
             raise ValueError(
-                "File system of the manifest '%s' does not match the file "
-                "system of samples '%s'" % (root_fs, paths_fs)
+                "File system of CVAT cloud storage '%s' does not match the "
+                "file system of samples '%s'" % (root_fs, paths_fs)
             )
 
-        if self._supports_content_v2:
-            manifest_files = []
-            self._parse_v2_cloud_manifest(
-                manifest_files, cloud_storage_id, manifest_filename
-            )
-        else:
-            manifest_files = self._parse_v1_cloud_manifest(
-                cloud_storage_id, manifest_filename
-            )
-
-        formatted_paths = set([_to_rel_url(p, root_dir) for p in paths])
-        unspecified_paths = formatted_paths - set(manifest_files)
-        if unspecified_paths:
+        # Ensure all paths are in the given cloud storage bucket
+        paths_buckets = {fos.get_bucket_name(p) for p in paths}
+        root_bucket = fos.get_bucket_name(root_dir)
+        if len(paths_buckets) > 1:
             raise ValueError(
-                "Found %d files that are not specified in the given manifest "
-                "`%s` in cloud storage `%d`"
-                % (len(unspecified_paths), manifest_filename, cloud_storage_id)
+                "Attempting to load media from CVAT cloud storage bucket '%s',"
+                " but found samples from multiple buckets: %s"
+                % (root_bucket, paths_buckets)
             )
+        paths_bucket = list(paths_buckets)[0]
+        if root_bucket != paths_bucket:
+            raise ValueError(
+                "Bucket of CVAT cloud storage '%s' does not match the "
+                "bucket of samples '%s'" % (root_bucket, paths_bucket)
+            )
+
+        if manifest_filename:
+            # The existance of every media path is only verified when a
+            # manifest file is available
+            if self._supports_content_v2:
+                manifest_files = []
+                self._parse_v2_cloud_manifest(
+                    manifest_files, cloud_storage_id, manifest_filename
+                )
+            else:
+                manifest_files = self._parse_v1_cloud_manifest(
+                    cloud_storage_id, manifest_filename
+                )
+
+            formatted_paths = set([_to_rel_url(p, root_dir) for p in paths])
+            unspecified_paths = formatted_paths - set(manifest_files)
+            if unspecified_paths:
+                raise ValueError(
+                    "Found %d files that are not specified in the given "
+                    "manifest `%s` in cloud storage `%d`"
+                    % (
+                        len(unspecified_paths),
+                        manifest_filename,
+                        cloud_storage_id,
+                    )
+                )
 
     def _parse_v1_cloud_manifest(self, cloud_storage_id, manifest_filename):
         content_url = self.cloud_storages_content_url(
@@ -7382,6 +7558,38 @@ class CVATShape(CVATLabel):
         ]
         label = fol.Detection(
             label=self.label, bounding_box=bbox, index=self.index
+        )
+        self._set_attributes(label)
+        return label
+
+    def to_instance(self):
+        """Converts this shape to a :class:`fiftyone.core.labels.Detection`
+        with instance mask.
+
+        Returns:
+            a :class:`fiftyone.core.labels.Detection`
+        """
+        xtl, ytl, xbr, ybr = self.points[-4:]
+        rel = np.array(self.points[:-4], dtype=int)
+        frame_width, frame_height = self.frame_size
+
+        # +1 to convert from CVAT indexing
+        mask_w, mask_h = round(xbr - xtl) + 1, round(ybr - ytl) + 1
+        mask = HasCVATBinaryMask._rle_to_binary_image_mask(
+            rel, mask_height=mask_h, mask_width=mask_w
+        )
+
+        bbox = [
+            xtl / frame_width,
+            ytl / frame_height,
+            (xbr - xtl) / frame_width,
+            (ybr - ytl) / frame_height,
+        ]
+        label = fol.Detection(
+            label=self.label,
+            bounding_box=bbox,
+            index=self.index,
+            mask=mask,
         )
         self._set_attributes(label)
         return label
