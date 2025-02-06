@@ -7827,7 +7827,7 @@ def load_cvat_video_annotations(xml_path):
 class CVATCloudProviders(object):
     """Enumeration of cloud storage providers supported by CVAT"""
 
-    S3 = "AWS_S3_BUCKET"
+    S3 = "CONDUCTOR"
     GCS = "GOOGLE_CLOUD_STORAGE"
     AZURE = "AZURE_CONTAINER"
 
