@@ -2,7 +2,7 @@
 Utilities for working with datasets in
 `CVAT format <https://github.com/opencv/cvat>`_.
 
-| Copyright 2017-2024, Voxel51, Inc.
+| Copyright 2017-2025, Voxel51, Inc.
 | `voxel51.com <https://voxel51.com/>`_
 |
 """
@@ -1619,6 +1619,31 @@ class CVATImage(object):
         )
 
 
+class HasCVATBinaryMask(object):
+    """Mixin for CVAT annotations that store RLE format instance masks."""
+
+    @staticmethod
+    def _rle_to_binary_image_mask(rle, mask_width, mask_height):
+        mask = np.zeros(mask_width * mask_height, dtype=np.uint8)
+        counter = 0
+        for i, val in enumerate(rle):
+            if i % 2 == 1:
+                mask[counter : counter + val] = 1
+            counter += val
+        return mask.reshape(mask_height, mask_width)
+
+    @staticmethod
+    def _mask_to_cvat_rle(binary_mask):
+        counts = []
+        for i, (value, elements) in enumerate(
+            itertools.groupby(binary_mask.ravel(order="C"))
+        ):
+            if i == 0 and value == 1:
+                counts.append(0)
+            counts.append(len(list(elements)))
+        return counts
+
+
 class HasCVATPoints(object):
     """Mixin for CVAT annotations that store a list of ``(x, y)`` pixel
     coordinates.
@@ -3077,6 +3102,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
             media files on disk to upload
         url (None): the url of the CVAT server
         username (None): the CVAT username
+        email (None): the CVAT email
         password (None): the CVAT password
         headers (None): an optional dict of headers to add to all CVAT API
             requests
@@ -3168,6 +3194,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         media_field="filepath",
         url=None,
         username=None,
+        email=None,
         password=None,
         headers=None,
         task_size=None,
@@ -3219,6 +3246,7 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
 
         # store privately so these aren't serialized
         self._username = username
+        self._email = email
         self._password = password
         self._headers = headers
 
@@ -3229,6 +3257,14 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
     @username.setter
     def username(self, value):
         self._username = value
+
+    @property
+    def email(self):
+        return self._email
+
+    @email.setter
+    def email(self, value):
+        self._email = value
 
     @property
     def password(self):
@@ -3247,10 +3283,14 @@ class CVATBackendConfig(foua.AnnotationBackendConfig):
         self._headers = value
 
     def load_credentials(
-        self, url=None, username=None, password=None, headers=None
+        self, url=None, username=None, password=None, email=None, headers=None
     ):
         self._load_parameters(
-            url=url, username=username, password=password, headers=headers
+            url=url,
+            username=username,
+            password=password,
+            email=email,
+            headers=headers,
         )
 
 
@@ -3350,6 +3390,7 @@ class CVATBackend(foua.AnnotationBackend):
             self.config.name,
             self.config.url,
             username=self.config.username,
+            email=self.config.email,
             password=self.config.password,
             headers=self.config.headers,
             organization=self.config.organization,
@@ -3597,6 +3638,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         name: the name of the backend
         url: url of the CVAT server
         username (None): the CVAT username
+        email (None): the CVAT email
         password (None): the CVAT password
         headers (None): an optional dict of headers to add to all requests
         organization (None): the name of the organization to use when sending
@@ -3608,6 +3650,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         name,
         url,
         username=None,
+        email=None,
         password=None,
         headers=None,
         organization=None,
@@ -3615,6 +3658,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         self._name = name
         self._url = url.rstrip("/")
         self._username = username
+        self._email = email
         self._password = password
         self._headers = headers
         self._organization = organization
@@ -3814,6 +3858,7 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
 
         username = self._username
         password = self._password
+        email = self._email
 
         if username is None or password is None:
             username, password = self._prompt_username_password(
@@ -3831,13 +3876,13 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
         self._server_version = Version("2")
 
         try:
-            self._login(username, password)
+            self._login(username, password, email=email)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code != 404:
                 raise e
 
             self._server_version = Version("1")
-            self._login(username, password)
+            self._login(username, password, email=email)
 
         self._add_referer()
         self._add_organization()
@@ -3874,12 +3919,19 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
     def close(self):
         self._session.close()
 
-    def _login(self, username, password):
+    def _login(self, username, password, email=None):
+        payload = {
+            "username": username,
+            "password": password,
+        }
+        if email is not None:
+            payload["email"] = email
+
         response = self._make_request(
             self._session.post,
             self.login_url,
             print_error_info=False,
-            json={"username": username, "password": password},
+            json=payload,
         )
 
         if "csrftoken" in response.cookies:
@@ -6129,6 +6181,9 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
             if shape_type == "rectangle":
                 label_type = "detections"
                 label = cvat_shape.to_detection()
+            elif shape_type == "mask":
+                label_type = "detections"
+                label = cvat_shape.to_instance()
             elif shape_type == "polygon":
                 if expected_label_type == "segmentation":
                     # A piece of a segmentation mask
@@ -6623,12 +6678,14 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                 xbr = float(round((x + w) * width))
                 ybr = float(round((y + h) * height))
                 bbox = [xtl, ytl, xbr, ybr]
+                rotation = det["rotation"] if "rotation" in det else 0.0 or 0.0
 
                 curr_shapes.append(
                     {
                         "type": "rectangle",
                         "occluded": is_occluded,
                         "points": bbox,
+                        "rotation": rotation,
                         "label_id": class_name,
                         "group": group_id,
                         "frame": frame_id,
@@ -6637,27 +6694,26 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                     }
                 )
             elif label_type in ("instance", "instances"):
-                if det.mask is None:
+                if det.has_mask is None:
                     continue
 
-                polygon = det.to_polyline()
-                for points in polygon.points:
-                    if len(points) < 3:
-                        continue  # CVAT polygons must contain >= 3 points
+                if self._server_version >= Version("2.3"):
+                    x, y, _, _ = det.bounding_box
+                    frame_width, frame_height = frame_size
+                    mask_height, mask_width = det.mask.shape
+                    xtl, ytl = round(x * frame_width), round(y * frame_height)
+                    xbr, ybr = xtl + mask_width, ytl + mask_height
 
-                    abs_points = HasCVATPoints._to_abs_points(
-                        points, frame_size
-                    )
-                    flattened_points = list(
-                        itertools.chain.from_iterable(abs_points)
-                    )
+                    # -1 to convert from CVAT indexing
+                    rle = HasCVATBinaryMask._mask_to_cvat_rle(det.mask)
+                    rle.extend([xtl, ytl, xbr - 1, ybr - 1])
 
                     curr_shapes.append(
                         {
-                            "type": "polygon",
+                            "type": "mask",
                             "occluded": is_occluded,
                             "z_order": 0,
-                            "points": flattened_points,
+                            "points": rle,
                             "label_id": class_name,
                             "group": group_id,
                             "frame": frame_id,
@@ -6665,6 +6721,32 @@ class CVATAnnotationAPI(foua.AnnotationAPI):
                             "attributes": deepcopy(attributes),
                         }
                     )
+                else:
+                    polygon = det.to_polyline()
+                    for points in polygon.points:
+                        if len(points) < 3:
+                            continue  # CVAT polygons must contain >= 3 points
+
+                        abs_points = HasCVATPoints._to_abs_points(
+                            points, frame_size
+                        )
+                        flattened_points = list(
+                            itertools.chain.from_iterable(abs_points)
+                        )
+
+                        curr_shapes.append(
+                            {
+                                "type": "polygon",
+                                "occluded": is_occluded,
+                                "z_order": 0,
+                                "points": flattened_points,
+                                "label_id": class_name,
+                                "group": group_id,
+                                "frame": frame_id,
+                                "source": "manual",
+                                "attributes": deepcopy(attributes),
+                            }
+                        )
 
             if not curr_shapes:
                 continue
@@ -7478,6 +7560,38 @@ class CVATShape(CVATLabel):
         ]
         label = fol.Detection(
             label=self.label, bounding_box=bbox, index=self.index
+        )
+        self._set_attributes(label)
+        return label
+
+    def to_instance(self):
+        """Converts this shape to a :class:`fiftyone.core.labels.Detection`
+        with instance mask.
+
+        Returns:
+            a :class:`fiftyone.core.labels.Detection`
+        """
+        xtl, ytl, xbr, ybr = self.points[-4:]
+        rel = np.array(self.points[:-4], dtype=int)
+        frame_width, frame_height = self.frame_size
+
+        # +1 to convert from CVAT indexing
+        mask_w, mask_h = round(xbr - xtl) + 1, round(ybr - ytl) + 1
+        mask = HasCVATBinaryMask._rle_to_binary_image_mask(
+            rel, mask_height=mask_h, mask_width=mask_w
+        )
+
+        bbox = [
+            xtl / frame_width,
+            ytl / frame_height,
+            (xbr - xtl) / frame_width,
+            (ybr - ytl) / frame_height,
+        ]
+        label = fol.Detection(
+            label=self.label,
+            bounding_box=bbox,
+            index=self.index,
+            mask=mask,
         )
         self._set_attributes(label)
         return label
