@@ -1154,37 +1154,34 @@ class ImportAnnotations(foo.Operator):
     def __call__(
             self,
             sample_collection,
-            project_name=None,
-            project_id=None,
-            task_ids=None,
-            data_path=None,
-            label_types=None,
-            insert_new=True,
-            download_media=False,
-            num_workers=None,
-            occluded_attr=None,
-            group_id_attr=None,
             **kwargs,
         ):
-        with fou.add_sys_path(os.path.dirname(os.path.abspath(__file__))):
-            importlib.reload(custom_cvat)
-        custom_cvat.import_annotations(
-            sample_collection,
-            project_name=project_name,
-            project_id=project_id,
-            task_ids=task_ids,
-            data_path=data_path,
-            label_types=label_types,
-            insert_new=insert_new,
-            download_media=download_media,
-            num_workers=num_workers,
-            occluded_attr=occluded_attr,
-            group_id_attr=group_id_attr,
-            **kwargs,
-        )
+
+        ctx = dict(view=sample_collection.view())
+        params = dict(**kwargs)
+        foo.execute_operator(self.uri, ctx, params=params)
 
     def execute(self, ctx):
-        pass
+        kwargs = ctx.params.copy()
+        if "backend" not in kwargs:
+            kwargs["backend"] = "custom_cvat"
+
+        if "custom_cvat" not in fo.annotation_config.backends:
+            fo.annotation_config.backends["custom_cvat"] = {}
+
+        fo.annotation_config.backends["custom_cvat"].update({
+            "config_cls": "custom_cvat.CVATBackendConfig",
+            "url": "https://app.cvat.ai"
+        })
+
+        with fou.add_sys_path(os.path.dirname(os.path.abspath(__file__))):
+            importlib.reload(custom_cvat)
+
+        _inject_annotation_secrets(ctx)
+        custom_cvat.import_annotations(
+            ctx.view,
+            **kwargs,
+        )
 
 
 def register(p):
