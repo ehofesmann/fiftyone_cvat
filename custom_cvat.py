@@ -241,7 +241,8 @@ def import_annotations(
 
     if dataset.media_type == fom.VIDEO:
         # The download implementation requires IDs for all possible frames
-        dataset.select_by("filepath", task_filepaths).ensure_frames()
+        for filepath_batch in fou.iter_batches(task_filepaths, 100):
+            dataset.select_by("filepath", filepath_batch).ensure_frames()
 
     anno_key = "tmp_" + str(ObjectId())
     anno_backend.register_run(dataset, anno_key, overwrite=False)
@@ -451,7 +452,7 @@ def _build_sparse_frame_id_map(dataset, cvat_id_map):
     frame_id_map = {}
     frame_id = -1
     for filepath_batch in fou.iter_batches(task_filepaths, 100):
-        samples = dataset.select_by("filepath", task_filepaths)
+        samples = dataset.select_by("filepath", filepath_batch)
 
 
         if samples.media_type == fom.VIDEO:
