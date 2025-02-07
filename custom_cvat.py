@@ -166,7 +166,11 @@ def import_annotations(
 
     # Build mapping from CVAT filenames to local filepaths
     data_dir = None
-    existing_filepaths = sample_collection.values("filepath")
+    existing_filepaths = []
+    batch_size = 100
+    for batch_ind in range(0, len(sample_collection), batch_size):
+        batch = sample_collection[batch_ind:batch_ind+batch_size]
+        existing_filepaths.extend(batch.values("filepath"))
     if data_path is None:
         data_map = {os.path.basename(f): f for f in existing_filepaths}
     elif etau.is_str(data_path) and data_path.endswith(".json"):
@@ -444,29 +448,30 @@ def _download_annotations(
 
 def _build_sparse_frame_id_map(dataset, cvat_id_map):
     task_filepaths = list(cvat_id_map.keys())
-    samples = dataset.select_by("filepath", task_filepaths)
-
     frame_id_map = {}
+    frame_id = -1
+    for filepath_batch in fou.iter_batches(task_filepaths, 100):
+        samples = dataset.select_by("filepath", task_filepaths)
 
-    if samples.media_type == fom.VIDEO:
-        # Video tasks have exactly one video, and we download labels for all
-        # of its frames
-        frame_id = -1
-        sample_ids, frame_ids = samples.values(["id", "frames.id"])
-        for sample_id, _frame_ids in zip(sample_ids, frame_ids):
-            for _frame_id in _frame_ids:
-                frame_id += 1
-                frame_id_map[frame_id] = {
-                    "sample_id": sample_id,
-                    "frame_id": _frame_id,
-                }
-    else:
-        # For image tasks, only allow downloads for filepaths in `cvat_id_map`
-        sample_ids, filepaths = samples.values(["id", "filepath"])
-        for sample_id, filepath in zip(sample_ids, filepaths):
-            frame_id = cvat_id_map.get(filepath, None)
-            if frame_id is not None:
-                frame_id_map[frame_id] = {"sample_id": sample_id}
+
+        if samples.media_type == fom.VIDEO:
+            # Video tasks have exactly one video, and we download labels for all
+            # of its frames
+            sample_ids, frame_ids = samples.values(["id", "frames.id"])
+            for sample_id, _frame_ids in zip(sample_ids, frame_ids):
+                for _frame_id in _frame_ids:
+                    frame_id += 1
+                    frame_id_map[frame_id] = {
+                        "sample_id": sample_id,
+                        "frame_id": _frame_id,
+                    }
+        else:
+            # For image tasks, only allow downloads for filepaths in `cvat_id_map`
+            sample_ids, filepaths = samples.values(["id", "filepath"])
+            for sample_id, filepath in zip(sample_ids, filepaths):
+                frame_id = cvat_id_map.get(filepath, None)
+                if frame_id is not None:
+                    frame_id_map[frame_id] = {"sample_id": sample_id}
 
     return frame_id_map
 
