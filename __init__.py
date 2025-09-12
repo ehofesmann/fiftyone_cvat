@@ -39,12 +39,11 @@ class RequestAnnotations(foo.Operator):
         if "label_schema" in kwargs and isinstance(kwargs["label_schema"], dict):
             kwargs["label_schema"] = json.dumps(kwargs["label_schema"])
 
-        kwargs["delegate"] = delegate
-
         params = dict(
             anno_key=anno_key,
             schema_type="JSON",
             required_inputs=False,
+            delegate=delegate,
             **kwargs,
         )
         foo.execute_operator(self.uri, ctx, params=params)
