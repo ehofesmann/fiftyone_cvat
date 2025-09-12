@@ -36,6 +36,11 @@ class RequestAnnotations(foo.Operator):
 
     def __call__(self, sample_collection, anno_key, delegate=False, **kwargs):
         ctx = dict(view=sample_collection.view())
+        if "label_schema" in kwargs and isinstance(kwargs["label_schema"], dict):
+            kwargs["label_schema"] = json.dumps(kwargs["label_schema"])
+
+        kwargs["delegate"] = delegate
+
         params = dict(
             anno_key=anno_key,
             schema_type="JSON",
